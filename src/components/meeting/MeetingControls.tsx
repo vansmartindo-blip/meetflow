@@ -47,6 +47,7 @@ interface MeetingControlsProps {
   onLeave: () => void
   localStream: MediaStream | null
   onToggleScreenShare: () => void
+  onToggleRecording: () => void
 }
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥']
@@ -118,6 +119,7 @@ export default function MeetingControls({
   onLeave,
   localStream,
   onToggleScreenShare,
+  onToggleRecording,
 }: MeetingControlsProps) {
   const {
     isMuted,
@@ -199,8 +201,8 @@ export default function MeetingControls({
   }, [toggleCamera, localStream, socket, isCameraOff])
 
   const handleToggleRecording = useCallback(() => {
-    setRecording(!isRecording)
-  }, [setRecording, isRecording])
+    onToggleRecording()
+  }, [onToggleRecording])
 
   const handleToggleHand = useCallback(() => {
     const raised = toggleHand()

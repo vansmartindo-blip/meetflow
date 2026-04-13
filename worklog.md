@@ -118,3 +118,43 @@ Stage Summary:
 - All compilation errors resolved
 - App loads successfully in browser
 - Both Next.js (3000) and Meeting Service (3003) running
+
+---
+Task ID: fix-1
+Agent: Main Orchestrator
+Task: Fix video streams not showing for remote participants
+
+Work Log:
+- Identified root cause: WebRTC `ontrack` stored streams in `peerStreamsRef` (a plain Map ref) but never exposed them to VideoGrid/VideoTile components
+- Peer objects in Zustand store had no `stream` property → VideoTile always showed avatar fallback
+- Added `peerStreamsMap` reactive state in MeetingRoom that gets updated on every `ontrack` event
+- Passed `peerStreams` prop to VideoGrid
+- Updated VideoGrid to merge streams from `peerStreams` into remote peer objects
+- Updated VideoTile to properly attach srcObject to video elements and auto-play
+- Added track event listeners in VideoTile to detect when video tracks are added/removed/enabled/ended
+- Added connection state logging for debugging
+- Also fixed `isLocal` comparison to check against `myPeerInfo.socketId` (not just 'local' string)
+
+Stage Summary:
+- Remote participant video streams now properly display when WebRTC connection is established
+- Video auto-plays on stream arrival
+- Fallback to avatar when camera is off or no video track available
+
+---
+Task ID: fix-2
+Agent: Main Orchestrator
+Task: Implement recording with .mp4/.webm download
+
+Work Log:
+- Implemented MediaRecorder API in MeetingRoom.tsx
+- `startRecording`: Combines local stream + all remote peer streams into one MediaStream, creates MediaRecorder with mp4 preferred (webm fallback)
+- `stopRecording`: Stops recorder, creates Blob from chunks, auto-triggers download
+- File naming: `meeting-{roomId}-{timestamp}.{ext}`
+- Added `onToggleRecording` prop flow: MeetingRoom → MeetingControls
+- Added "Save Recording" download button in top bar (appears after recording stops)
+- Cleanup: stops recorder on leave meeting
+- Added console logging for recording mimeType used
+
+Stage Summary:
+- Recording starts with ⏺ button, stops and auto-downloads as .mp4 (or .webm fallback)
+- Save Recording button appears in top bar for re-download

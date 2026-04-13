@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Socket } from 'socket.io-client'
 import { motion, AnimatePresence } from 'framer-motion'
-import { PhoneOff, AlertTriangle, Wifi, WifiOff, SignalMedium, SignalLow, Lock } from 'lucide-react'
+import { PhoneOff, AlertTriangle, Wifi, WifiOff, SignalMedium, SignalLow, Lock, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { getSocket, disconnectSocket } from '@/lib/socket-client'
@@ -44,7 +44,7 @@ export default function MeetingRoom() {
     addPeer, removePeer, updatePeerMedia, updatePeerHand, setHostId, setPeers,
     addChatMessage, setMuted, setCameraOff, setScreenSharing, setHandRaised,
     setRoomLocked, setScreenShareEnabled, clearRoom, setView,
-    addReaction, removeReaction, setNetworkQuality,
+    addReaction, removeReaction, setNetworkQuality, isRecording, setRecording,
   } = useMeetingStore()
 
   const user = useUserStore((s) => s.user)
@@ -59,7 +59,114 @@ export default function MeetingRoom() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
 
-  // ============ Initialize Media ============
+  // ─── FIX 1: Track peer streams as reactive state so VideoGrid can access them ───
+  const [peerStreamsMap, setPeerStreamsMap] = useState<Map<string, MediaStream>>(new Map())
+  const updatePeerStream = useCallback((socketId: string, stream: MediaStream) => {
+    setPeerStreamsMap((prev) => {
+      const next = new Map(prev)
+      next.set(socketId, stream)
+      return next
+    })
+  }, [])
+
+  // ─── FIX 2: Recording with MediaRecorder ───
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const recordedChunksRef = useRef<Blob[]>([])
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
+
+  const startRecording = useCallback(() => {
+    try {
+      // Gather all available streams
+      const tracks: MediaStreamTrack[] = []
+      if (localStreamRef.current) {
+        tracks.push(...localStreamRef.current.getTracks())
+      }
+      peerStreamsRef.current.forEach((stream) => {
+        stream.getTracks().forEach((t) => {
+          if (!tracks.find((existing) => existing.id === t.id)) {
+            tracks.push(t)
+          }
+        })
+      })
+
+      if (tracks.length === 0) {
+        console.warn('No tracks to record')
+        return
+      }
+
+      const combinedStream = new MediaStream(tracks)
+
+      // Try mp4 first, fallback to webm
+      const mimeType = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')
+        ? 'video/mp4;codecs=avc1'
+        : MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+          ? 'video/webm;codecs=vp9,opus'
+          : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+            ? 'video/webm;codecs=vp8,opus'
+            : 'video/webm'
+
+      const recorder = new MediaRecorder(combinedStream, {
+        mimeType,
+        videoBitsPerSecond: 2500000,
+      })
+
+      recordedChunksRef.current = []
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          recordedChunksRef.current.push(e.data)
+        }
+      }
+
+      recorder.onstop = () => {
+        const ext = mimeType.startsWith('video/mp4') ? 'mp4' : 'webm'
+        const blob = new Blob(recordedChunksRef.current, { type: mimeType })
+        const url = URL.createObjectURL(blob)
+        setDownloadUrl(url)
+        setRecording(false)
+
+        // Auto download
+        const a = document.createElement('a')
+        a.href = url
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+        a.download = `meeting-${roomId || 'recording'}-${timestamp}.${ext}`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+
+        // Cleanup URL after some time
+        setTimeout(() => {
+          URL.revokeObjectURL(url)
+          setDownloadUrl(null)
+        }, 60000)
+      }
+
+      recorder.start(1000) // collect chunks every 1s
+      mediaRecorderRef.current = recorder
+      setRecording(true)
+      console.log(`Recording started (mimeType: ${mimeType})`)
+    } catch (err) {
+      console.error('Failed to start recording:', err)
+    }
+  }, [roomId, setRecording])
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current = null
+    }
+    setRecording(false)
+  }, [setRecording])
+
+  const handleToggleRecording = useCallback(() => {
+    if (isRecording) {
+      stopRecording()
+    } else {
+      startRecording()
+    }
+  }, [isRecording, startRecording, stopRecording])
+
+  // ─── Initialize Media ───
   const initLocalMedia = useCallback(async () => {
     try {
       const constraints: MediaStreamConstraints = {
@@ -79,7 +186,6 @@ export default function MeetingRoom() {
       localStreamRef.current = stream
       setLocalStream(stream)
 
-      // Set initial mute/camera state based on tracks
       const audioTrack = stream.getAudioTracks()[0]
       const videoTrack = stream.getVideoTracks()[0]
       if (audioTrack) audioTrack.enabled = !isMuted
@@ -88,7 +194,6 @@ export default function MeetingRoom() {
       return stream
     } catch (err) {
       console.error('Failed to get media devices:', err)
-      // Try audio only
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
         localStreamRef.current = stream
@@ -115,13 +220,26 @@ export default function MeetingRoom() {
         })
       }
 
-      // Handle incoming tracks
+      // ─── FIX: On incoming track, store stream in BOTH ref AND state ───
       pc.ontrack = (event) => {
-        const stream = event.streams[0] || new MediaStream()
-        if (event.track) {
-          stream.addTrack(event.track)
+        // Use the stream from the event (WebRTC creates/reuses streams automatically)
+        let stream: MediaStream | null = event.streams[0] || null
+
+        if (!stream) {
+          stream = new MediaStream()
         }
+
+        if (event.track) {
+          // Only add if not already in the stream
+          if (!stream.getTrackById(event.track.id)) {
+            stream.addTrack(event.track)
+          }
+        }
+
         peerStreamsRef.current.set(peerSocketId, stream)
+        // Update reactive state so VideoGrid re-renders
+        updatePeerStream(peerSocketId, stream)
+        console.log(`[WebRTC] Track received from ${peerSocketId}: ${event.track.kind}`)
       }
 
       // Handle ICE candidates
@@ -139,9 +257,17 @@ export default function MeetingRoom() {
       // Handle connection state
       pc.onconnectionstatechange = () => {
         const state = pc.connectionState
+        console.log(`[WebRTC] Connection state with ${peerSocketId}: ${state}`)
         if (state === 'connected') setNetworkQuality('excellent')
         else if (state === 'disconnected') setNetworkQuality('poor')
         else if (state === 'connecting') setNetworkQuality('good')
+        else if (state === 'failed') {
+          console.warn(`[WebRTC] Connection with ${peerSocketId} failed`)
+        }
+      }
+
+      pc.oniceconnectionstatechange = () => {
+        console.log(`[WebRTC] ICE connection with ${peerSocketId}: ${pc.iceConnectionState}`)
       }
 
       // Store connection
@@ -164,7 +290,7 @@ export default function MeetingRoom() {
       console.error('Failed to create peer connection:', err)
       return null
     }
-  }, [])
+  }, [updatePeerStream, setNetworkQuality])
 
   const handleSignal = useCallback(async (data: { from: string; signal: any; type: string }) => {
     const { from, signal, type } = data
@@ -211,7 +337,6 @@ export default function MeetingRoom() {
         screenStreamRef.current = screenStream
         setScreenSharing(true)
 
-        // Send screen share tracks to all peers
         peerConnectionsRef.current.forEach((pc) => {
           const sender = pc.getSenders().find((s) => s.track?.kind === 'video')
           if (sender && screenStream.getVideoTracks()[0]) {
@@ -221,11 +346,9 @@ export default function MeetingRoom() {
 
         socketRef.current?.emit('screen-share-start', { peerId: socketRef.current?.id })
 
-        // Handle screen share stop
         screenStream.getVideoTracks()[0].onended = () => {
           setScreenSharing(false)
           screenStreamRef.current = null
-          // Restore camera
           if (localStreamRef.current) {
             const videoTrack = localStreamRef.current.getVideoTracks()[0]
             if (videoTrack) {
@@ -244,7 +367,6 @@ export default function MeetingRoom() {
         }
         setScreenSharing(false)
 
-        // Restore camera tracks
         if (localStreamRef.current) {
           const videoTrack = localStreamRef.current.getVideoTracks()[0]
           if (videoTrack) {
@@ -267,11 +389,9 @@ export default function MeetingRoom() {
     if (!roomId || !user) return
 
     const init = async () => {
-      // Initialize media first
       const stream = await initLocalMedia()
       if (!stream) return
 
-      // Connect socket
       const socket = getSocket()
       socketRef.current = socket
 
@@ -279,7 +399,6 @@ export default function MeetingRoom() {
         socket.connect()
       }
 
-      // Wait for connection
       const waitForConnection = () => {
         return new Promise<void>((resolve) => {
           if (socket.connected) {
@@ -292,7 +411,6 @@ export default function MeetingRoom() {
 
       await waitForConnection()
 
-      // Join room
       socket.emit('join-room', {
         roomId,
         user: {
@@ -308,7 +426,6 @@ export default function MeetingRoom() {
         screenShareEnabled: boolean; peers: ExtendedPeerInfo[]; yourRole: 'host' | 'participant';
         yourPeerId: ExtendedPeerInfo;
       }) => {
-        // Update store
         useMeetingStore.getState().setRoom(
           data.roomId,
           data.title,
@@ -375,13 +492,17 @@ export default function MeetingRoom() {
       })
 
       socket.on('peer-left', (data: { peerId: string; userId: string }) => {
-        // Close peer connection
         const pc = peerConnectionsRef.current.get(data.peerId)
         if (pc) {
           pc.close()
           peerConnectionsRef.current.delete(data.peerId)
         }
         peerStreamsRef.current.delete(data.peerId)
+        setPeerStreamsMap((prev) => {
+          const next = new Map(prev)
+          next.delete(data.peerId)
+          return next
+        })
         removePeer(data.peerId)
       })
 
@@ -408,7 +529,6 @@ export default function MeetingRoom() {
       })
 
       socket.on('screen-share-started', (data: { peerId: string }) => {
-        // Update peer to indicate screen sharing
         updatePeerMedia(data.peerId, {} as any)
       })
 
@@ -454,10 +574,9 @@ export default function MeetingRoom() {
     init()
 
     return () => {
-      // Cleanup on unmount
       cleanup()
     }
-  }, [roomId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [roomId])
 
   // ============ Media Toggle Effects ============
   useEffect(() => {
@@ -474,27 +593,30 @@ export default function MeetingRoom() {
 
   // ============ Cleanup ============
   const cleanup = useCallback(() => {
-    // Close all peer connections
+    // Stop recording if active
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current = null
+    }
+
     peerConnectionsRef.current.forEach((pc) => pc.close())
     peerConnectionsRef.current.clear()
     peerStreamsRef.current.clear()
 
-    // Stop local stream
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => t.stop())
       localStreamRef.current = null
     }
 
-    // Stop screen stream
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach((t) => t.stop())
       screenStreamRef.current = null
     }
 
     setLocalStream(null)
+    setPeerStreamsMap(new Map())
   }, [])
 
-  // ============ Leave Meeting ============
   const leaveMeeting = useCallback(() => {
     cleanup()
     disconnectSocket()
@@ -503,7 +625,7 @@ export default function MeetingRoom() {
     setView('dashboard')
   }, [cleanup, clearRoom, setView])
 
-  // ============ Network Quality Simulation ============
+  // ============ Network Quality ============
   useEffect(() => {
     if (!roomId) return
     const interval = setInterval(() => {
@@ -589,7 +711,7 @@ export default function MeetingRoom() {
         <div className="flex items-center gap-4">
           {/* Timer & Recording */}
           <div className="flex items-center gap-2">
-            {useMeetingStore.getState().isRecording && (
+            {isRecording && (
               <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20">
                 <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
                 <span className="text-red-400 text-xs font-medium">REC</span>
@@ -597,6 +719,29 @@ export default function MeetingRoom() {
             )}
             <span className="text-zinc-400 text-sm font-mono">{elapsedTime}</span>
           </div>
+
+          {/* Download Recording */}
+          {downloadUrl && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+            >
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 gap-1.5"
+                onClick={() => {
+                  const a = document.createElement('a')
+                  a.href = downloadUrl
+                  a.download = `meeting-${roomId}-${Date.now()}.webm`
+                  a.click()
+                }}
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span className="text-xs">Save Recording</span>
+              </Button>
+            </motion.div>
+          )}
 
           {/* Network Quality */}
           <div className="flex items-center gap-1" title="Network Quality">
@@ -626,7 +771,8 @@ export default function MeetingRoom() {
       <div className="flex-1 flex overflow-hidden relative">
         {/* Video Area */}
         <div className="flex-1 relative">
-          <VideoGrid localStream={localStream} />
+          {/* Pass peerStreamsMap so VideoGrid can merge streams into peer objects */}
+          <VideoGrid localStream={localStream} peerStreams={peerStreamsMap} />
 
           {/* Floating Reactions */}
           <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-2 z-10 pointer-events-none">
@@ -683,6 +829,7 @@ export default function MeetingRoom() {
         onLeave={leaveMeeting}
         localStream={localStream}
         onToggleScreenShare={handleToggleScreenShare}
+        onToggleRecording={handleToggleRecording}
       />
 
       {/* Settings Dialog */}
@@ -690,5 +837,3 @@ export default function MeetingRoom() {
     </motion.div>
   )
 }
-
-
