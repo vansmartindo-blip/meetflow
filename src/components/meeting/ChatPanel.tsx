@@ -8,12 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Send, Smile, Paperclip, X, MessageSquare, FileIcon } from 'lucide-react'
 import { useMeetingStore, ChatMsg } from '@/stores/meeting-store'
-
-const COMMON_EMOJIS = [
-  '👍', '❤️', '😂', '🎉', '🔥', '👏',
-  '😮', '🤔', '👋', '💪', '🙏', '✅',
-  '❌', '⭐', '💯', '🎊', '🚀', '😎',
-]
+import EmojiPicker from './EmojiPicker'
 
 export default function ChatPanel({ socket }: { socket: any }) {
   const { chatMessages, addChatMessage, setChatOpen, myPeerInfo } = useMeetingStore()
@@ -317,26 +312,15 @@ export default function ChatPanel({ socket }: { socket: any }) {
       {/* Emoji Picker */}
       <AnimatePresence>
         {showEmojiPicker && (
-          <motion.div
-            ref={emojiPickerRef}
-            initial={{ opacity: 0, y: 8, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.95 }}
-            transition={{ duration: 0.15 }}
-            className="absolute bottom-16 left-3 z-50 p-2 rounded-xl bg-zinc-800 border border-zinc-700 shadow-xl"
-          >
-            <div className="grid grid-cols-6 gap-1">
-              {COMMON_EMOJIS.map((emoji) => (
-                <button
-                  key={emoji}
-                  onClick={() => insertEmoji(emoji)}
-                  className="flex items-center justify-center h-9 w-9 rounded-lg text-lg hover:bg-zinc-700/60 transition-colors cursor-pointer"
-                >
-                  {emoji}
-                </button>
-              ))}
-            </div>
-          </motion.div>
+          <div className="absolute bottom-16 left-3 z-50">
+            <EmojiPicker
+              onSelect={(emoji) => {
+                insertEmoji(emoji)
+                setShowEmojiPicker(false)
+              }}
+              onClose={() => setShowEmojiPicker(false)}
+            />
+          </div>
         )}
       </AnimatePresence>
 

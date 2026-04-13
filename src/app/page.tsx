@@ -28,14 +28,14 @@ export default function Home() {
   }, [])
 
   return (
-    <AnimatePresence mode="wait">
+    <AnimatePresence mode="sync">
       {currentView === 'dashboard' && (
         <motion.div
           key="dashboard"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
+          transition={{ duration: 0.15 }}
           className="min-h-screen"
         >
           <Dashboard />
@@ -47,7 +47,8 @@ export default function Home() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
+          transition={{ duration: 0.15 }}
+          className="min-h-screen"
         >
           <MeetingRoom />
         </motion.div>

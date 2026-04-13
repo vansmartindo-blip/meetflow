@@ -39,6 +39,9 @@ import {
   X,
   Crown,
   Shield,
+  Presentation,
+  Paperclip,
+  Image as ImageIcon,
 } from 'lucide-react'
 import { useMeetingStore } from '@/stores/meeting-store'
 
@@ -48,6 +51,8 @@ interface MeetingControlsProps {
   localStream: MediaStream | null
   onToggleScreenShare: () => void
   onToggleRecording: () => void
+  onSettingsOpen: () => void
+  onToggleVirtualBackground: () => void
 }
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥']
@@ -120,6 +125,8 @@ export default function MeetingControls({
   localStream,
   onToggleScreenShare,
   onToggleRecording,
+  onSettingsOpen,
+  onToggleVirtualBackground,
 }: MeetingControlsProps) {
   const {
     isMuted,
@@ -129,6 +136,9 @@ export default function MeetingControls({
     isHandRaised,
     isChatOpen,
     isParticipantListOpen,
+    isWhiteboardOpen,
+    isFileShareOpen,
+    virtualBackground,
     unreadMessages,
     peers,
     myRole,
@@ -143,12 +153,14 @@ export default function MeetingControls({
     toggleHand,
     toggleChat,
     toggleParticipantList,
+    toggleWhiteboard,
+    toggleFileShare,
     setRoomLocked,
     setScreenShareEnabled,
   } = useMeetingStore()
 
   const [elapsedTime, setElapsedTime] = useState(0)
-  const [showSettings, setShowSettings] = useState(false)
+  const [showVirtualBg, setShowVirtualBg] = useState(false)
 
   const isHost = myRole === 'host'
   const participantCount = peers.length + 1 // include self
@@ -413,6 +425,26 @@ export default function MeetingControls({
               </div>
             </div>
 
+            {/* Whiteboard */}
+            <ControlButton
+              tooltip="Whiteboard"
+              active={isWhiteboardOpen}
+              activeColor="bg-violet-600/80 hover:bg-violet-500"
+              onClick={toggleWhiteboard}
+            >
+              <Presentation className="h-5 w-5" />
+            </ControlButton>
+
+            {/* File Share */}
+            <ControlButton
+              tooltip="Files"
+              active={isFileShareOpen}
+              activeColor="bg-amber-600/80 hover:bg-amber-500"
+              onClick={toggleFileShare}
+            >
+              <Paperclip className="h-5 w-5" />
+            </ControlButton>
+
             {/* Reactions */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -457,11 +489,23 @@ export default function MeetingControls({
               >
                 {/* Settings */}
                 <DropdownMenuItem
-                  onClick={() => setShowSettings(true)}
+                  onClick={onSettingsOpen}
                   className="flex items-center gap-3 px-3 py-2 rounded-lg text-zinc-200 hover:bg-zinc-700/60 cursor-pointer focus:bg-zinc-700/60 focus:text-zinc-200"
                 >
                   <Settings className="h-4 w-4 text-zinc-400" />
                   <span className="text-sm">Settings</span>
+                </DropdownMenuItem>
+
+                {/* Virtual Background */}
+                <DropdownMenuItem
+                  onClick={onToggleVirtualBackground}
+                  className="flex items-center gap-3 px-3 py-2 rounded-lg text-zinc-200 hover:bg-zinc-700/60 cursor-pointer focus:bg-zinc-700/60 focus:text-zinc-200"
+                >
+                  <ImageIcon className="h-4 w-4 text-zinc-400" />
+                  <span className="text-sm">Virtual Background</span>
+                  {virtualBackground && (
+                    <span className="ml-auto text-[10px] text-emerald-400">Active</span>
+                  )}
                 </DropdownMenuItem>
 
                 {/* Host-only options */}

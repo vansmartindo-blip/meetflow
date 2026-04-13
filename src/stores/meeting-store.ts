@@ -66,6 +66,17 @@ interface MeetingState {
   // Participant List
   isParticipantListOpen: boolean
 
+  // Whiteboard
+  isWhiteboardOpen: boolean
+
+  // File Share
+  isFileShareOpen: boolean
+
+  // Virtual Background
+  virtualBackground: string | null
+  virtualBackgroundType: 'none' | 'blur' | 'gradient' | 'image'
+  virtualBackgroundValue: string | null
+
   // Reactions
   activeReactions: Reaction[]
 
@@ -111,6 +122,18 @@ interface MeetingState {
   toggleParticipantList: () => void
   setParticipantListOpen: (open: boolean) => void
 
+  // Actions - Whiteboard
+  toggleWhiteboard: () => void
+  setWhiteboardOpen: (open: boolean) => void
+
+  // Actions - File Share
+  toggleFileShare: () => void
+  setFileShareOpen: (open: boolean) => void
+
+  // Actions - Virtual Background
+  setVirtualBackground: (bg: string | null) => void
+  setVirtualBackgroundType: (type: 'none' | 'blur' | 'gradient' | 'image', value: string | null) => void
+
   // Actions - Reactions
   addReaction: (reaction: Reaction) => void
   removeReaction: (userId: string, emoji: string) => void
@@ -154,6 +177,17 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
 
   // Participant List
   isParticipantListOpen: false,
+
+  // Whiteboard
+  isWhiteboardOpen: false,
+
+  // File Share
+  isFileShareOpen: false,
+
+  // Virtual Background
+  virtualBackground: null,
+  virtualBackgroundType: 'none' as const,
+  virtualBackgroundValue: null,
 
   // Reactions
   activeReactions: [],
@@ -241,29 +275,80 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
   setHandRaised: (raised) => set({ isHandRaised: raised }),
 
   // Actions - Chat
-  addChatMessage: (msg) => set((state) => ({
-    chatMessages: [...state.chatMessages, msg],
-    unreadMessages: state.isChatOpen ? 0 : state.unreadMessages + 1
-  })),
+  addChatMessage: (msg) => set((state) => {
+    // Deduplicate: skip if a message with same userId, content, and similar timestamp already exists
+    const isDuplicate = state.chatMessages.some(
+      (m) => m.userId === msg.userId && m.content === msg.content && Math.abs(m.timestamp - msg.timestamp) < 2000
+    )
+    if (isDuplicate) return state
+    return {
+      chatMessages: [...state.chatMessages, msg],
+      unreadMessages: state.isChatOpen ? 0 : state.unreadMessages + 1,
+    }
+  }),
   clearChat: () => set({ chatMessages: [], unreadMessages: 0 }),
   toggleChat: () => set((state) => ({
     isChatOpen: !state.isChatOpen,
     unreadMessages: state.isChatOpen ? 0 : state.unreadMessages,
-    isParticipantListOpen: false
+    isParticipantListOpen: false,
+    isWhiteboardOpen: false,
+    isFileShareOpen: false,
   })),
   setChatOpen: (open) => set({
     isChatOpen: open,
-    unreadMessages: open ? 0 : undefined as any
+    unreadMessages: open ? 0 : undefined as any,
+    isWhiteboardOpen: false,
+    isFileShareOpen: false,
   }),
 
   // Actions - Participant List
   toggleParticipantList: () => set((state) => ({
     isParticipantListOpen: !state.isParticipantListOpen,
-    isChatOpen: false
+    isChatOpen: false,
+    isWhiteboardOpen: false,
+    isFileShareOpen: false,
   })),
   setParticipantListOpen: (open) => set({
     isParticipantListOpen: open,
-    isChatOpen: false
+    isChatOpen: false,
+    isWhiteboardOpen: false,
+    isFileShareOpen: false,
+  }),
+
+  // Actions - Whiteboard
+  toggleWhiteboard: () => set((state) => ({
+    isWhiteboardOpen: !state.isWhiteboardOpen,
+    isChatOpen: false,
+    isParticipantListOpen: false,
+    isFileShareOpen: false,
+  })),
+  setWhiteboardOpen: (open) => set({
+    isWhiteboardOpen: open,
+    isChatOpen: false,
+    isParticipantListOpen: false,
+    isFileShareOpen: false,
+  }),
+
+  // Actions - File Share
+  toggleFileShare: () => set((state) => ({
+    isFileShareOpen: !state.isFileShareOpen,
+    isChatOpen: false,
+    isParticipantListOpen: false,
+    isWhiteboardOpen: false,
+  })),
+  setFileShareOpen: (open) => set({
+    isFileShareOpen: open,
+    isChatOpen: false,
+    isParticipantListOpen: false,
+    isWhiteboardOpen: false,
+  }),
+
+  // Actions - Virtual Background
+  setVirtualBackground: (bg) => set({ virtualBackground: bg }),
+  setVirtualBackgroundType: (type, value) => set({
+    virtualBackgroundType: type,
+    virtualBackgroundValue: value,
+    virtualBackground: type === 'none' ? null : `${type}:${value || ''}`,
   }),
 
   // Actions - Reactions

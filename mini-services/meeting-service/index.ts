@@ -3,7 +3,6 @@ import { Server } from 'socket.io'
 
 const httpServer = createServer()
 const io = new Server(httpServer, {
-  path: '/',
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
@@ -33,6 +32,7 @@ interface RoomInfo {
   password?: string
   screenShareEnabled: boolean
   peers: Map<string, PeerInfo>
+  whiteboardData: any[]
 }
 
 interface ChatMessage {
@@ -107,7 +107,8 @@ io.on('connection', (socket) => {
         hostId: user.id,
         isLocked: false,
         screenShareEnabled: true,
-        peers: new Map()
+        peers: new Map(),
+        whiteboardData: []
       }
       rooms.set(roomId, room)
     }
@@ -196,7 +197,7 @@ io.on('connection', (socket) => {
       timestamp: Date.now()
     }
 
-    broadcastToRoom(roomId, 'chat-message', msg)
+    broadcastToRoom(roomId, 'chat-message', msg, socket.id)
   })
 
   // ---- Media State ----
@@ -370,6 +371,62 @@ io.on('connection', (socket) => {
     })
     room.peers.clear()
     rooms.delete(roomId)
+  })
+
+  // ---- Whiteboard ----
+  socket.on('whiteboard-draw', (data: { type: 'draw' | 'clear' | 'undo'; strokes?: any[]; currentStroke?: any }) => {
+    const roomId = userRooms.get(socket.id)
+    if (!roomId) return
+
+    const room = rooms.get(roomId)
+    if (!room) return
+
+    switch (data.type) {
+      case 'draw':
+        if (data.currentStroke) {
+          room.whiteboardData.push(data.currentStroke)
+        }
+        if (data.strokes) {
+          // Batch draw: replace all strokes
+          room.whiteboardData = [...data.strokes]
+        }
+        break
+      case 'clear':
+        room.whiteboardData = []
+        break
+      case 'undo':
+        room.whiteboardData.pop()
+        break
+    }
+
+    broadcastToRoom(roomId, 'whiteboard-draw', data, socket.id)
+  })
+
+  socket.on('whiteboard-sync', () => {
+    const roomId = userRooms.get(socket.id)
+    if (!roomId) return
+
+    const room = rooms.get(roomId)
+    if (!room) return
+
+    socket.emit('whiteboard-sync', { strokes: room.whiteboardData })
+  })
+
+  // ---- File Sharing ----
+  socket.on('file-share', (data: { fileName: string; fileSize: number; fileType: string; fileData: string; userId: string; userName: string }) => {
+    const roomId = userRooms.get(socket.id)
+    if (!roomId) return
+
+    const room = rooms.get(roomId)
+    if (!room) return
+
+    // Broadcast file to all other peers
+    broadcastToRoom(roomId, 'file-share', data, socket.id)
+
+    // Send system message about file share
+    sendSystemMessage(roomId, `${data.userName} shared a file: ${data.fileName}`)
+
+    console.log(`[Meeting] File shared in room ${roomId}: ${data.fileName} (${data.fileSize} bytes)`)
   })
 
   // ---- Disconnect ----
