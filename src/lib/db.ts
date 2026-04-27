@@ -4,25 +4,13 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-// In production (Vercel), disable query logging and use connection pooling.
-// In development, enable query logging for easier debugging.
+// Prisma reads DATABASE_URL from schema.prisma's env("DATABASE_URL") at connection time.
+// Do NOT pass datasourceUrl to the constructor — it causes build failures when
+// DATABASE_URL is not available at build time (e.g., during next build).
 export const db =
   globalForPrisma.prisma ??
   new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['query'] : ['error'],
-    datasourceUrl: process.env.DATABASE_URL,
-    // Connection limits for serverless (Vercel)
-    // Each serverless function gets its own connection
-    ...(process.env.NODE_ENV === 'production'
-      ? {
-          // Avoid connection exhaustion in serverless
-          datasources: {
-            db: {
-              url: process.env.DATABASE_URL,
-            },
-          },
-        }
-      : {}),
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
