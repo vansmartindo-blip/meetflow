@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ============================================================
+// DATABASE CONFIGURATION
+// ============================================================
+// Production uses PostgreSQL (Vercel + Neon).
+// For local development with SQLite, swap the provider to "sqlite"
+// and set DATABASE_URL to "file:./dev.db"
+// ============================================================
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  avatar    String?
+  role      String   @default("user")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  meetings MeetingParticipant[]
+  hostedMeetings Meeting[]
+}
+
+model Meeting {
+  id          String   @id @default(cuid())
+  title       String
+  hostId      String
+  host        User     @relation(fields: [hostId], references: [id])
+  password    String?
+  isLocked    Boolean  @default(false)
+  status      String   @default("active")
+  maxUsers    Int      @default(20)
+  createdAt   DateTime @default(now())
+  endedAt     DateTime?
+
+  participants MeetingParticipant[]
+  chatMessages ChatMessage[]
+  sharedFiles  SharedFile[]
+}
+
+model MeetingParticipant {
+  id        String   @id @default(cuid())
+  meetingId String
+  userId    String
+  meeting   Meeting  @relation(fields: [meetingId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+  role      String   @default("participant")
+  joinedAt  DateTime @default(now())
+  leftAt    DateTime?
+
+  @@unique([meetingId, userId])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  meetingId String
+  meeting   Meeting  @relation(fields: [meetingId], references: [id])
+  userId    String
+  userName  String
+  content   String
+  type      String   @default("text")
+  createdAt DateTime @default(now())
+}
+
+model SharedFile {
+  id        String   @id @default(cuid())
+  meetingId String
+  meeting   Meeting  @relation(fields: [meetingId], references: [id])
+  userId    String
+  userName  String
+  fileName  String
+  fileSize  Int
+  fileUrl   String
+  createdAt DateTime @default(now())
+}
+
+model MeetingHistory {
+  id        String   @id @default(cuid())
+  meetingId String
+  userId    String
+  title     String
+  duration  Int
+  startedAt DateTime @default(now())
+  endedAt   DateTime?
+}
