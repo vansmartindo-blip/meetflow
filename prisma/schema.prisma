@@ -2,8 +2,16 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// ============================================================
+// DATABASE CONFIGURATION
+// ============================================================
+// Vercel (production) uses PostgreSQL (e.g. Neon).
+// For local development with SQLite, swap provider to "sqlite"
+// and set DATABASE_URL to "file:./dev.db"
+// ============================================================
+
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

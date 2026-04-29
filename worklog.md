@@ -677,3 +677,32 @@ Stage Summary:
 - Smooth feathered edges separate foreground (person) from background — no hard jagged silhouettes
 - User sees toast notifications for success/error states
 - Loading indicator in panel while model initializes
+
+---
+Task ID: fix-vercel-500-v2
+Agent: Main Agent
+Task: Fix Internal Server Error (500) on Vercel deployment - register/login
+
+Work Log:
+- Analyzed screenshot: 500 error on /api/auth when trying to register at meetflow-murex.vercel.app
+- Discovered ALL previous fixes had been reverted to old code:
+  - prisma/schema.prisma: still provider=sqlite (Vercel needs postgresql)
+  - src/lib/db.ts: still log:['query'] (production-unsafe), no testDbConnection
+  - src/app/api/auth/route.ts: still generic "Internal server error"
+  - next.config.ts: still output:"standalone" (incompatible with Vercel)
+  - .config file blocking Prisma generate
+- Root cause: Vercel serverless cannot use SQLite (no filesystem), provider must be postgresql
+- Fix 1: Changed prisma/schema.prisma provider from "sqlite" to "postgresql"
+- Fix 2: Rewrote src/lib/db.ts — disabled query logging in production, added testDbConnection() helper
+- Fix 3: Rewrote src/app/api/auth/route.ts — added getErrorDetails() mapping common DB errors to specific messages with codes (DB_CONNECTION, DB_MIGRATION, DB_SSL, DB_AUTH, DB_POOL)
+- Fix 4: Removed output:"standalone" and allowedDevOrigins from next.config.ts
+- Fix 5: Created src/app/api/health/route.ts — GET /api/health returns DB connection status + actionable hints
+- Fix 6: Updated .env.example with PostgreSQL, JWT_SECRET, NEXT_PUBLIC_SOCKET_URL instructions
+- Fix 7: Moved blocking .config to .config.bak, regenerated Prisma client for PostgreSQL provider
+- ESLint clean, dev server returns 200
+
+Stage Summary:
+- All 6 files fixed for Vercel PostgreSQL deployment
+- /api/health provides instant diagnostics for database issues
+- Auth route now returns specific error codes instead of generic 500
+- User needs to: push code, set DATABASE_URL (Neon PostgreSQL) + JWT_SECRET in Vercel env vars, run prisma db push
